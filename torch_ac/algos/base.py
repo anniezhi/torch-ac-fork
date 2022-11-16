@@ -3,6 +3,7 @@ import torch
 
 from torch_ac.format import default_preprocess_obss
 from torch_ac.utils import DictList, ParallelEnv
+import torch.nn.functional as F
 
 
 class BaseAlgo(ABC):
@@ -47,6 +48,7 @@ class BaseAlgo(ABC):
         # Store parameters
 
         self.env = ParallelEnv(envs)
+        self.goal = envs[0].goal
         self.acmodel = acmodel
         self.device = device
         self.num_frames_per_proc = num_frames_per_proc
@@ -81,6 +83,7 @@ class BaseAlgo(ABC):
 
         self.obs = self.env.reset()
         self.obss = [None] * (shape[0])
+        self.goal = torch.flatten(F.one_hot(torch.tensor(self.goal), num_classes=envs[0].spec.kwargs['size'])).type(torch.FloatTensor)
         if self.acmodel.recurrent:
             self.memory = torch.zeros(shape[1], self.acmodel.memory_size, device=self.device)
             self.memories = torch.zeros(*shape, self.acmodel.memory_size, device=self.device)
@@ -130,7 +133,7 @@ class BaseAlgo(ABC):
             preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
             with torch.no_grad():
                 if self.acmodel.recurrent:
-                    dist, value, memory = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
+                    dist, value, memory = self.acmodel(preprocessed_obs, self.goal, self.memory * self.mask.unsqueeze(1))
                 else:
                     dist, value = self.acmodel(preprocessed_obs)
             action = dist.sample()
@@ -180,7 +183,7 @@ class BaseAlgo(ABC):
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
         with torch.no_grad():
             if self.acmodel.recurrent:
-                _, next_value, _ = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
+                _, next_value, _ = self.acmodel(preprocessed_obs, self.goal, self.memory * self.mask.unsqueeze(1))
             else:
                 _, next_value = self.acmodel(preprocessed_obs)
 
