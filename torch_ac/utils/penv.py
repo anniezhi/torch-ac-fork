@@ -44,12 +44,13 @@ class ParallelEnv(gym.Env):
         return results
 
     def step(self, actions):
-        for local, action in zip(self.locals, actions[1:]):
-            local.send(("step", action))
-        obs, reward, terminated, truncated, info = self.envs[0].step(actions[0])
+        actions, actions_scale = actions
+        for local, action, action_scale in zip(self.locals, actions[1:], actions_scale[1:]):
+            local.send(("step", (action, action_scale)))
+        obs, reward, terminated, truncated, info = self.envs[0].step((actions[0], actions_scale[0]))
         if terminated or truncated:
             obs, _ = self.envs[0].reset()
-        results = zip(*[(obs, reward, terminated, truncated, info)] + [local.recv() for local in self.locals])
+        results = zip(*[(obs, reward, terminated, truncated, info)] + [local.recv() for local in self.locals])        
         return results
 
     def render(self):

@@ -90,10 +90,14 @@ class BaseAlgo(ABC):
         self.mask = torch.ones(shape[1], device=self.device)
         self.masks = torch.zeros(*shape, device=self.device)
         self.actions = torch.zeros(*shape, device=self.device, dtype=torch.int)
+        self.actions_scale = torch.zeros(*shape, device=self.device)
         self.values = torch.zeros(*shape, device=self.device)
+        self.values_scale = torch.zeros(*shape, device=self.device)
         self.rewards = torch.zeros(*shape, device=self.device)
         self.advantages = torch.zeros(*shape, device=self.device)
+        self.advantages_scale = torch.zeros(*shape, device=self.device)
         self.log_probs = torch.zeros(*shape, device=self.device)
+        self.log_probs_scale = torch.zeros(*shape, device=self.device)
 
         # Initialize log values
 
@@ -136,9 +140,13 @@ class BaseAlgo(ABC):
                     dist, value, memory = self.acmodel(preprocessed_obs, self.goal, self.memory * self.mask.unsqueeze(1))
                 else:
                     dist, value = self.acmodel(preprocessed_obs)
+            dist, dist_scale = dist
+            value, value_scale = value
+            
             action = dist.sample()
+            action_scale = dist_scale.sample()
 
-            obs, reward, terminated, truncated, _ = self.env.step(action.cpu().numpy())
+            obs, reward, terminated, truncated, _ = self.env.step((action.cpu().numpy(), action_scale.cpu().numpy()))
             done = tuple(a | b for a, b in zip(terminated, truncated))
 
             # Update experiences values
@@ -151,7 +159,9 @@ class BaseAlgo(ABC):
             self.masks[i] = self.mask
             self.mask = 1 - torch.tensor(done, device=self.device, dtype=torch.float)
             self.actions[i] = action
+            self.actions_scale[i] = action_scale
             self.values[i] = value
+            self.values_scale[i] = value_scale
             if self.reshape_reward is not None:
                 self.rewards[i] = torch.tensor([
                     self.reshape_reward(obs_, action_, reward_, done_)
@@ -160,6 +170,7 @@ class BaseAlgo(ABC):
             else:
                 self.rewards[i] = torch.tensor(reward, device=self.device)
             self.log_probs[i] = dist.log_prob(action)
+            self.log_probs_scale[i] = dist_scale.log_prob(action_scale)
 
             # Update log values
 
@@ -186,14 +197,19 @@ class BaseAlgo(ABC):
                 _, next_value, _ = self.acmodel(preprocessed_obs, self.goal, self.memory * self.mask.unsqueeze(1))
             else:
                 _, next_value = self.acmodel(preprocessed_obs)
+        next_value, next_value_scale = next_value
 
         for i in reversed(range(self.num_frames_per_proc)):
             next_mask = self.masks[i+1] if i < self.num_frames_per_proc - 1 else self.mask
             next_value = self.values[i+1] if i < self.num_frames_per_proc - 1 else next_value
+            next_value_scale = self.values_scale[i+1] if i < self.num_frames_per_proc - 1 else next_value_scale
             next_advantage = self.advantages[i+1] if i < self.num_frames_per_proc - 1 else 0
+            next_advantage_scale = self.advantages_scale[i+1] if i < self.num_frames_per_proc - 1 else 0
 
             delta = self.rewards[i] + self.discount * next_value * next_mask - self.values[i]
+            delta_scale = self.rewards[i] + self.discount * next_value_scale * next_mask - self.values_scale[i]
             self.advantages[i] = delta + self.discount * self.gae_lambda * next_advantage * next_mask
+            self.advantages_scale[i] = delta_scale + self.discount * self.gae_lambda * next_advantage_scale * next_mask
 
         # Define experiences:
         #   the whole experience is the concatenation of the experience
@@ -214,11 +230,16 @@ class BaseAlgo(ABC):
             exps.mask = self.masks.transpose(0, 1).reshape(-1).unsqueeze(1)
         # for all tensors below, T x P -> P x T -> P * T
         exps.action = self.actions.transpose(0, 1).reshape(-1)
+        exps.action_scale = self.actions_scale.transpose(0, 1).reshape(-1)
         exps.value = self.values.transpose(0, 1).reshape(-1)
+        exps.value_scale = self.values_scale.transpose(0, 1).reshape(-1)
         exps.reward = self.rewards.transpose(0, 1).reshape(-1)
         exps.advantage = self.advantages.transpose(0, 1).reshape(-1)
+        exps.advantage_scale = self.advantages_scale.transpose(0, 1).reshape(-1)
         exps.returnn = exps.value + exps.advantage
+        exps.returnn_scale = exps.value_scale + exps.advantage_scale
         exps.log_prob = self.log_probs.transpose(0, 1).reshape(-1)
+        exps.log_prob_scale = self.log_probs_scale.transpose(0, 1).reshape(-1)
 
         # Preprocess experiences
 

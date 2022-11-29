@@ -33,18 +33,26 @@ class PPOAlgo(BaseAlgo):
             # Initialize log values
 
             log_entropies = []
+            log_entropies_scale = []
             log_values = []
+            log_values_scale = []
             log_policy_losses = []
+            log_policy_losses_scale = []
             log_value_losses = []
+            log_value_losses_scale = []
             log_grad_norms = []
 
             for inds in self._get_batches_starting_indexes():
                 # Initialize batch values
 
                 batch_entropy = 0
+                batch_entropy_scale = 0
                 batch_value = 0
+                batch_value_scale = 0
                 batch_policy_loss = 0
+                batch_policy_loss_scale = 0
                 batch_value_loss = 0
+                batch_value_loss_scale = 0
                 batch_loss = 0
 
                 # Initialize memory
@@ -63,27 +71,46 @@ class PPOAlgo(BaseAlgo):
                         dist, value, memory = self.acmodel(sb.obs, self.goal, memory * sb.mask)
                     else:
                         dist, value = self.acmodel(sb.obs)
+                    dist, dist_scale = dist
+                    value, value_scale = value
 
                     entropy = dist.entropy().mean()
+                    entropy_scale = dist_scale.entropy().mean()
 
                     ratio = torch.exp(dist.log_prob(sb.action) - sb.log_prob)
                     surr1 = ratio * sb.advantage
                     surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * sb.advantage
                     policy_loss = -torch.min(surr1, surr2).mean()
 
+                    ratio_scale = torch.exp(dist_scale.log_prob(sb.action_scale) - sb.log_prob_scale)
+                    surr1_scale = ratio_scale * sb.advantage_scale
+                    surr2_scale = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * sb.advantage_scale
+                    policy_loss_scale = -torch.min(surr1_scale, surr2_scale).mean()
+
                     value_clipped = sb.value + torch.clamp(value - sb.value, -self.clip_eps, self.clip_eps)
                     surr1 = (value - sb.returnn).pow(2)
                     surr2 = (value_clipped - sb.returnn).pow(2)
                     value_loss = torch.max(surr1, surr2).mean()
 
-                    loss = policy_loss - self.entropy_coef * entropy + self.value_loss_coef * value_loss
+                    value_clipped_scale = sb.value_scale + torch.clamp(value_scale - sb.value_scale, -self.clip_eps, self.clip_eps)
+                    surr1_scale = (value_scale - sb.returnn_scale).pow(2)
+                    surr2_scale = (value_clipped_scale - sb.returnn_scale).pow(2)
+                    value_loss_scale = torch.max(surr1_scale, surr2_scale).mean()
+
+                    loss = policy_loss + policy_loss_scale \
+                           - self.entropy_coef * entropy - self.entropy_coef * entropy_scale \
+                           + self.value_loss_coef * value_loss + self.value_loss_coef * value_loss_scale
 
                     # Update batch values
 
                     batch_entropy += entropy.item()
+                    batch_entropy_scale += entropy_scale.item()
                     batch_value += value.mean().item()
+                    batch_value_scale += value_scale.mean().item()
                     batch_policy_loss += policy_loss.item()
+                    batch_policy_loss_scale += policy_loss_scale.item()
                     batch_value_loss += value_loss.item()
+                    batch_value_loss_scale += value_loss_scale.item()
                     batch_loss += loss
 
                     # Update memories for next epoch
@@ -94,9 +121,13 @@ class PPOAlgo(BaseAlgo):
                 # Update batch values
 
                 batch_entropy /= self.recurrence
+                batch_entropy_scale /= self.recurrence
                 batch_value /= self.recurrence
+                batch_value_scale /= self.recurrence
                 batch_policy_loss /= self.recurrence
+                batch_policy_loss_scale /= self.recurrence
                 batch_value_loss /= self.recurrence
+                batch_value_loss_scale /= self.recurrence
                 batch_loss /= self.recurrence
 
                 # Update actor-critic
@@ -110,18 +141,26 @@ class PPOAlgo(BaseAlgo):
                 # Update log values
 
                 log_entropies.append(batch_entropy)
+                log_entropies_scale.append(batch_entropy_scale)
                 log_values.append(batch_value)
+                log_values_scale.append(batch_value_scale)
                 log_policy_losses.append(batch_policy_loss)
+                log_policy_losses_scale.append(batch_policy_loss_scale)
                 log_value_losses.append(batch_value_loss)
+                log_value_losses_scale.append(batch_value_loss_scale)
                 log_grad_norms.append(grad_norm)
 
         # Log some values
 
         logs = {
             "entropy": numpy.mean(log_entropies),
+            "entropy_scale": numpy.mean(log_entropies_scale),
             "value": numpy.mean(log_values),
+            "value_scale": numpy.mean(log_values_scale),
             "policy_loss": numpy.mean(log_policy_losses),
+            "policy_loss_scale": numpy.mean(log_policy_losses_scale),
             "value_loss": numpy.mean(log_value_losses),
+            "value_loss_scale": numpy.mean(log_value_losses_scale),
             "grad_norm": numpy.mean(log_grad_norms)
         }
 
