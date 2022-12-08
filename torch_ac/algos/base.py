@@ -5,6 +5,7 @@ from torch_ac.format import default_preprocess_obss
 from torch_ac.utils import DictList, ParallelEnv
 import torch.nn.functional as F
 
+import numpy as np
 
 class BaseAlgo(ABC):
     """The base class for RL algorithms."""
@@ -146,7 +147,7 @@ class BaseAlgo(ABC):
             action = dist.sample()
             action_scale = dist_scale.sample()
 
-            obs, reward, terminated, truncated, _ = self.env.step((action.cpu().numpy(), action_scale.cpu().numpy()))
+            obs, reward, terminated, truncated, _ = self.env.step((action.cpu().numpy(), np.clip(action_scale.cpu(),0,1)))
             done = tuple(a | b for a, b in zip(terminated, truncated))
 
             # Update experiences values
