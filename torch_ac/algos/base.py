@@ -97,6 +97,8 @@ class BaseAlgo(ABC):
         self.rewards = torch.zeros(*shape, device=self.device)
         self.advantages = torch.zeros(*shape, device=self.device)
         self.advantages_scale = torch.zeros(*shape, device=self.device)
+        self.agent_poss = [None] * (shape[0])
+        self.agent_dirs = torch.zeros(*shape, device=self.device)
         self.log_probs = torch.zeros(*shape, device=self.device)
         self.log_probs_scale = torch.zeros(*shape, device=self.device)
 
@@ -147,7 +149,7 @@ class BaseAlgo(ABC):
             action = dist.sample()
             action_scale = dist_scale.sample()
 
-            obs, reward, terminated, truncated, _ = self.env.step((action.cpu().numpy(), np.clip(action_scale.cpu(),0,1)))
+            obs, reward, terminated, truncated, agent_pos, agent_dir, _ = self.env.step((action.cpu().numpy(), np.clip(action_scale.cpu(),0,1)))
             done = tuple(a | b for a, b in zip(terminated, truncated))
 
             # Update experiences values
@@ -170,6 +172,8 @@ class BaseAlgo(ABC):
                 ], device=self.device)
             else:
                 self.rewards[i] = torch.tensor(reward, device=self.device)
+            self.agent_poss[i] = torch.tensor(np.array(agent_pos), device=self.device)
+            self.agent_dirs[i] = torch.tensor(agent_dir, device=self.device)
             self.log_probs[i] = dist.log_prob(action)
             self.log_probs_scale[i] = dist_scale.log_prob(action_scale)
 
@@ -237,6 +241,8 @@ class BaseAlgo(ABC):
         exps.reward = self.rewards.transpose(0, 1).reshape(-1)
         exps.advantage = self.advantages.transpose(0, 1).reshape(-1)
         exps.advantage_scale = self.advantages_scale.transpose(0, 1).reshape(-1)
+        exps.agent_pos = torch.stack(self.agent_poss).transpose(0,1).reshape(-1,2)
+        exps.agent_dir = self.agent_dirs.transpose(0,1).reshape(-1)
         exps.returnn = exps.value + exps.advantage
         exps.returnn_scale = exps.value_scale + exps.advantage_scale
         exps.log_prob = self.log_probs.transpose(0, 1).reshape(-1)
