@@ -84,7 +84,12 @@ class BaseAlgo(ABC):
 
         self.obs = self.env.reset()
         self.obss = [None] * (shape[0])
-        self.goal = torch.flatten(F.one_hot(torch.tensor(self.goal), num_classes=envs[0].spec.kwargs['size'])).type(torch.FloatTensor)
+        if type(self.goal) is list:
+            def goal_onehot(x):
+                return F.one_hot(torch.tensor(x), num_classes=envs[0].spec.kwargs['size'])
+            self.goal = torch.flatten(torch.sum(torch.stack(list(map(goal_onehot, self.goal))), dim=0)).type(torch.FloatTensor)
+        else:
+            self.goal = torch.flatten(F.one_hot(torch.tensor(self.goal), num_classes=envs[0].spec.kwargs['size'])).type(torch.FloatTensor)
         if self.acmodel.recurrent:
             self.memory = torch.zeros(shape[1], self.acmodel.memory_size, device=self.device)
             self.memories = torch.zeros(*shape, self.acmodel.memory_size, device=self.device)
